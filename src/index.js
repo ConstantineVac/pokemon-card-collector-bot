@@ -2,10 +2,12 @@ require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 const { Client, GatewayIntentBits, Collection } = require('discord.js');
-const { connect } = require('../src/database');
+const { connect, getDatabase} = require('../src/database');
 const { REST } = require('@discordjs/rest');
 const { Routes } = require('discord-api-types/v9');
 const clientId = process.env.CLIENT;
+const pokemon = require('pokemontcgsdk'); 
+pokemon.configure({ apiKey: process.env.POKEKEY });
 
 const client = new Client({
     intents: [

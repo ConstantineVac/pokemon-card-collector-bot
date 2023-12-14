@@ -1,41 +1,61 @@
 // addCards.js
+require('dotenv').config();
 const axios = require('axios');
 const { getDatabase } = require('../database');
-const pokemon = require('pokemontcgsdk'); // Import the library
 const { EmbedBuilder } = require('discord.js');
 
-// axios.get('https://api.pokemontcg.io/v2/sets/')
-//   .then(response => {
-//     const sets = response.data.data;
-//     sets.forEach(set => {
-//       const collection = getDatabase().collection('Sets');
-//       collection.insertOne(set);
-
-//       axios.get(`https://api.pokemontcg.io/v2/cards?q=set.id:${set.id}`)
-//         .then(response => {
-//           const cards = response.data.data;
-//           cards.forEach(card => {
-//             const collection = getDatabase().collection('Cards');
-//             collection.findOne({ id: card.id }, function(err, result) {
-//               if (err) throw err;
-//               if (!result) {
-//                 collection.insertOne(card);
-//               }
-//             });
-//           });
-//         })
-//         .catch(error => {
-//           console.error(error);
-//         });
-//     });
-//   })
-//   .catch(error => {
-//     console.error(error);
-//   });
-
+const pokemon = require('pokemontcgsdk'); 
 pokemon.configure({ apiKey: process.env.POKEKEY });
+
+function getAllSets() {
+    return pokemon.set.all()
+      .then((sets) => {
+        return Promise.all(sets.map((set) => {
+          const collection = getDatabase().collection('Sets');
+          return collection.insertOne(set)
+            .then(() => set);
+        }));
+      });
+  }
+  
+  function getAllCardsForSet(setId) {
+    return pokemon.card.where({ q: `set.id:${setId}` })
+      .then((response) => response.data);
+  }
+  
+  function getCardIdsFromDatabase() {
+    const cardCollection = getDatabase().collection('Cards');
+    return cardCollection.find({}, { projection: { _id: 0, id: 1 } }).toArray()
+      .then((cards) => cards.map((card) => card.id));
+  }
+  
+  function insertMissingCards(cards, existingCardIds) {
+    const cardCollection = getDatabase().collection('Cards');
+  
+    const missingCards = cards.filter((card) => !existingCardIds.includes(card.id));
+  
+    return Promise.all(missingCards.map((missingCard) => {
+      return cardCollection.insertOne(missingCard);
+    }));
+  }
+  
+  // Start the process
+  Promise.all([getAllSets(), getCardIdsFromDatabase()])
+    .then(([sets, existingCardIds]) => {
+      // For each set, fetch and insert missing cards
+      return Promise.all(sets.map((set) => {
+        return getAllCardsForSet(set.id)
+          .then((cards) => insertMissingCards(cards, existingCardIds));
+      }));
+    })
+    .then(() => {
+      console.log('All sets and missing cards inserted successfully.');
+    })
+    .catch((error) => {
+      console.error('Error:', error);
+    });
+
 module.exports = {
-    
         name: 'add-cards',
         description: 'Add cards to your collection',
         options: [
@@ -115,7 +135,8 @@ module.exports = {
                 'name': selectedCardName,
                 'set.name': selectedSet,
             });
-            //console.log(cardInfo);
+            console.log(cardInfo);
+            console.log(cardInfo.tcgplayer.prices)
             const setInfo = await getDatabase().collection('Sets').findOne({ 'name': selectedSet})
             //console.log(setInfo);
 
@@ -158,7 +179,18 @@ module.exports = {
             .setTitle('Card Added to Collection')
             .setDescription(`Card: ${cardInfo.name}\nSet: ${cardInfo.set.name}\nCard Number: ${cardInfo.number}`)
             .setThumbnail(cardInfo.set.images.logo) // Set thumbnail to the set's picture
+            .addFields(
+                {
+                    name: 'Price',
+                    value: `Cardmarket AVG Price: €${cardInfo.cardmarket.prices.averageSellPrice ? cardInfo.cardmarket.prices.averageSellPrice.toString() : 'N/A'} | AVG 30-DAY: €${cardInfo.cardmarket.prices.avg30 ? cardInfo.cardmarket.prices.avg30.toString() : 'N/A'}`
+                },
+                {
+                    name: 'Price',
+                    value: `TCG Player AVG Price: $${cardInfo.tcgplayer.prices.holofoil.market ? cardInfo.tcgplayer.prices.holofoil.market.toString() : 'N/A'} | Market High: $${cardInfo.tcgplayer.prices.holofoil.high ? cardInfo.tcgplayer.prices.holofoil.high.toString() : 'N/A'}`
+                }
+            )
             .setImage(cardInfo.images.large); // Set the main image to the card's picture
+
 
             // Respond to the user with the embed
             await interaction.reply({ embeds: [embed], ephemeral: true });
