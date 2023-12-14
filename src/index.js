@@ -78,27 +78,31 @@ client.on('guildCreate', async (guild) => {
 
 // Commands
 client.on('interactionCreate', async interaction => {
-  if (interaction.isCommand()) {
-      const command = client.commands.get(interaction.commandName);
+    if (interaction.isCommand()) {
+        const command = client.commands.get(interaction.commandName);
 
-      if (!command) return;
+        if (!command) return;
 
-      try {
-          await command.execute(interaction);
-      } catch (error) {
-          console.error(error);
-          await interaction.reply({ content: 'There was an error executing that command!', ephemeral: true });
-      }
-  } else {
-      const command = client.commands.get(interaction.commandName);
-      if (!command || !command.autocomplete) return;
-      try {
-          await command.autocomplete(interaction);
-      } catch (error) {
-          console.error(error);
-          await interaction.respond({ content: 'An error occurred while fetching autocomplete choices.', ephemeral: true });
-      }
-  }
+        try {
+            await command.execute(interaction);
+        } catch (error) {
+            console.error(error);
+            await interaction.reply({ content: 'There was an error executing that command!', ephemeral: true });
+        }
+    } else if (interaction.isButton()) {
+        // Dynamically import the button click event handler
+        const handleButtonClick = require('../src/eventHandlers/buttonClicks');
+        handleButtonClick(interaction);  
+    } else {
+        const command = client.commands.get(interaction.commandName);
+        if (!command || !command.autocomplete) return;
+        try {
+            await command.autocomplete(interaction);
+        } catch (error) {
+            console.error(error);
+            await interaction.respond({ content: 'An error occurred while fetching autocomplete choices.', ephemeral: true });
+        }
+    }
 });
 
 client.login(process.env.TOKEN);

@@ -10,17 +10,28 @@ pokemon.configure({ apiKey: process.env.POKEKEY });
 function getAllSets() {
     return pokemon.set.all()
       .then((sets) => {
-        return Promise.all(sets.map((set) => {
-          const collection = getDatabase().collection('Sets');
-          return collection.insertOne(set)
-            .then(() => set);
-        }));
+        const collection = getDatabase().collection('Sets');
+  
+        // Get existing set IDs from the database
+        return getSetIdsFromDatabase().then(existingSetIds => {
+          // Filter out sets that already exist in the database
+          const newSets = sets.filter((set) => !existingSetIds.includes(set.id));
+  
+          // Insert only the new sets into the database
+          return Promise.all(newSets.map((set) => collection.insertOne(set).then(() => set)));
+        });
       });
   }
   
   function getAllCardsForSet(setId) {
     return pokemon.card.where({ q: `set.id:${setId}` })
       .then((response) => response.data);
+  }
+  
+  function getSetIdsFromDatabase() {
+    const setCollection = getDatabase().collection('Sets');
+    return setCollection.find({}, { projection: { _id: 0, id: 1 } }).toArray()
+      .then((sets) => sets.map((set) => set.id));
   }
   
   function getCardIdsFromDatabase() {
@@ -41,9 +52,9 @@ function getAllSets() {
   
   // Start the process
   Promise.all([getAllSets(), getCardIdsFromDatabase()])
-    .then(([sets, existingCardIds]) => {
-      // For each set, fetch and insert missing cards
-      return Promise.all(sets.map((set) => {
+    .then(([newSets, existingCardIds]) => {
+      // For each new set, fetch and insert missing cards
+      return Promise.all(newSets.map((set) => {
         return getAllCardsForSet(set.id)
           .then((cards) => insertMissingCards(cards, existingCardIds));
       }));
@@ -54,7 +65,7 @@ function getAllSets() {
     .catch((error) => {
       console.error('Error:', error);
     });
-
+  
 module.exports = {
         name: 'add-cards',
         description: 'Add cards to your collection',
@@ -112,8 +123,11 @@ module.exports = {
                     'set.name': selectedSet,
                 }).toArray();
 
-                // Load card names from 'cards' collection
-                choices = cards.map(card => ({ name: card.name, value: card.name }));
+                // Load card names and numbers from 'cards' collection
+                choices = cards.map(card => ({
+                    name: `${card.name} - ${card.number}`,
+                    value: `${card.name} - ${card.number}`,
+                }));
                 //console.log(selectedCard + selectedSet)
             }
 
@@ -128,13 +142,20 @@ module.exports = {
         try {
             // Retrieve the selected set and card name from user interaction
             const selectedSet = interaction.options.getString('set');
-            const selectedCardName = interaction.options.getString('card-name');
-            console.log(`Set: ${selectedSet} and Name: ${selectedCardName}`);
-             // Fetch card information from MongoDB based on the selected set and card name
-             const cardInfo = await getDatabase().collection('Cards').findOne({
+            const selectedCardNameNumber = interaction.options.getString('card-name');
+            const amount = interaction.options.getInteger('amount');
+            console.log(`Set: ${selectedSet} and Name/Number: ${selectedCardNameNumber}`);
+
+            // Split the combined value into card name and number
+            const [selectedCardName, selectedCardNumber] = selectedCardNameNumber.split(' - ');
+
+            // Fetch card information from MongoDB based on the selected set, card name, and card number
+            const cardInfo = await getDatabase().collection('Cards').findOne({
                 'name': selectedCardName,
+                'number': selectedCardNumber,
                 'set.name': selectedSet,
             });
+
             console.log(cardInfo);
             console.log(cardInfo.tcgplayer.prices)
             const setInfo = await getDatabase().collection('Sets').findOne({ 'name': selectedSet})
@@ -150,29 +171,36 @@ module.exports = {
             // Retrieve the user's ID from the interaction
             const userId = interaction.user.id;
 
-            // Check if the user profile already exists
-            const existingProfile = await userProfileCollection.findOne({ userId });
+            // Find the user profile in the database
+            const userProfile = await userProfileCollection.findOne({ userId });
 
-
-            // If the user profile exists, update it; otherwise, create a new one
-            if (existingProfile) {
-                // Update the existing user profile
+            if (userProfile) {
+                // Check if the card is already in the user's cards array
+                const existingCardIndex = userProfile.cards.findIndex(card => card.id === cardInfo.id);
+              
+                if (existingCardIndex !== -1) {
+                  // If the card exists, update the amount
+                  userProfile.cards[existingCardIndex].amount += amount;
+                } else {
+                  // If the card doesn't exist, add it to the cards array
+                  userProfile.cards.push({ id: cardInfo.id, amount });
+                }
+              
+                // Update the user profile in the database
                 await userProfileCollection.updateOne(
-                    { userId },
-                    {
-                        $set: {
-                            cardName: cardInfo.name,
-                            set: cardInfo.set.name,
-                            cardNumber: cardInfo.number,
-                            setPicture: setInfo.images.symbol,
-                            cardPicture: cardInfo.images.large,
-                        },
-                    }
+                  { userId },
+                  {
+                    $set: {
+                      cards: userProfile.cards,
+                    },
+                  }
                 );
-            } else {
-                interaction.reply({content: 'You do not have a profile. Use `/register` to register a profile !', ephemeral: true})
-            }
-            
+              } else {
+                interaction.reply({
+                  content: 'You do not have a profile. Use `/register` to register a profile!',
+                  ephemeral: true,
+                });
+              }
             // Create an instance of EmbedBuilder
             const embed = new EmbedBuilder()
             .setColor('#0099ff') // You can set the color as needed
@@ -182,15 +210,26 @@ module.exports = {
             .addFields(
                 {
                     name: 'Price',
-                    value: `Cardmarket AVG Price: €${cardInfo.cardmarket.prices.averageSellPrice ? cardInfo.cardmarket.prices.averageSellPrice.toString() : 'N/A'} | AVG 30-DAY: €${cardInfo.cardmarket.prices.avg30 ? cardInfo.cardmarket.prices.avg30.toString() : 'N/A'}`
+                    value: `Cardmarket AVG Price: ${cardInfo.cardmarket.prices.averageSellPrice ? cardInfo.cardmarket.prices.averageSellPrice.toLocaleString('en-US', { style: 'currency', currency: 'EUR' }) : 'N/A'} | AVG 30-DAY: ${cardInfo.cardmarket.prices.avg30 ? cardInfo.cardmarket.prices.avg30.toLocaleString('en-US', { style: 'currency', currency: 'EUR' }) : 'N/A'}`
                 },
                 {
                     name: 'Price',
-                    value: `TCG Player AVG Price: $${cardInfo.tcgplayer.prices.holofoil.market ? cardInfo.tcgplayer.prices.holofoil.market.toString() : 'N/A'} | Market High: $${cardInfo.tcgplayer.prices.holofoil.high ? cardInfo.tcgplayer.prices.holofoil.high.toString() : 'N/A'}`
+                    value: `TCG Player AVG Price: ${
+                        cardInfo.tcgplayer.prices.holofoil.market
+                            ? `${cardInfo.tcgplayer.prices.holofoil.market.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} (Holofoil)`
+                            : cardInfo.tcgplayer.prices.normal.market
+                            ? `${cardInfo.tcgplayer.prices.normal.market.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} (Normal)`
+                            : 'N/A'
+                    } | Market High: ${
+                        cardInfo.tcgplayer.prices.holofoil.high
+                            ? `${cardInfo.tcgplayer.prices.holofoil.high.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} (Holofoil)`
+                            : cardInfo.tcgplayer.prices.normal.high
+                            ? `${cardInfo.tcgplayer.prices.normal.high.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} (Normal)`
+                            : 'N/A'
+                    }`
                 }
             )
             .setImage(cardInfo.images.large); // Set the main image to the card's picture
-
 
             // Respond to the user with the embed
             await interaction.reply({ embeds: [embed], ephemeral: true });
