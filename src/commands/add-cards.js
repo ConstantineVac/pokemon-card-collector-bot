@@ -7,64 +7,64 @@ const { EmbedBuilder } = require('discord.js');
 const pokemon = require('pokemontcgsdk'); 
 pokemon.configure({ apiKey: process.env.POKEKEY });
 
-function getAllSets() {
-    return pokemon.set.all()
-      .then((sets) => {
-        const collection = getDatabase().collection('Sets');
+// function getAllSets() {
+//     return pokemon.set.all()
+//       .then((sets) => {
+//         const collection = getDatabase().collection('Sets');
   
-        // Get existing set IDs from the database
-        return getSetIdsFromDatabase().then(existingSetIds => {
-          // Filter out sets that already exist in the database
-          const newSets = sets.filter((set) => !existingSetIds.includes(set.id));
+//         // Get existing set IDs from the database
+//         return getSetIdsFromDatabase().then(existingSetIds => {
+//           // Filter out sets that already exist in the database
+//           const newSets = sets.filter((set) => !existingSetIds.includes(set.id));
   
-          // Insert only the new sets into the database
-          return Promise.all(newSets.map((set) => collection.insertOne(set).then(() => set)));
-        });
-      });
-  }
+//           // Insert only the new sets into the database
+//           return Promise.all(newSets.map((set) => collection.insertOne(set).then(() => set)));
+//         });
+//       });
+//   }
   
-  function getAllCardsForSet(setId) {
-    return pokemon.card.where({ q: `set.id:${setId}` })
-      .then((response) => response.data);
-  }
+//   function getAllCardsForSet(setId) {
+//     return pokemon.card.where({ q: `set.id:${setId}` })
+//       .then((response) => response.data);
+//   }
   
-  function getSetIdsFromDatabase() {
-    const setCollection = getDatabase().collection('Sets');
-    return setCollection.find({}, { projection: { _id: 0, id: 1 } }).toArray()
-      .then((sets) => sets.map((set) => set.id));
-  }
+//   function getSetIdsFromDatabase() {
+//     const setCollection = getDatabase().collection('Sets');
+//     return setCollection.find({}, { projection: { _id: 0, id: 1 } }).toArray()
+//       .then((sets) => sets.map((set) => set.id));
+//   }
   
-  function getCardIdsFromDatabase() {
-    const cardCollection = getDatabase().collection('Cards');
-    return cardCollection.find({}, { projection: { _id: 0, id: 1 } }).toArray()
-      .then((cards) => cards.map((card) => card.id));
-  }
+//   function getCardIdsFromDatabase() {
+//     const cardCollection = getDatabase().collection('Cards');
+//     return cardCollection.find({}, { projection: { _id: 0, id: 1 } }).toArray()
+//       .then((cards) => cards.map((card) => card.id));
+//   }
   
-  function insertMissingCards(cards, existingCardIds) {
-    const cardCollection = getDatabase().collection('Cards');
+//   function insertMissingCards(cards, existingCardIds) {
+//     const cardCollection = getDatabase().collection('Cards');
   
-    const missingCards = cards.filter((card) => !existingCardIds.includes(card.id));
+//     const missingCards = cards.filter((card) => !existingCardIds.includes(card.id));
   
-    return Promise.all(missingCards.map((missingCard) => {
-      return cardCollection.insertOne(missingCard);
-    }));
-  }
+//     return Promise.all(missingCards.map((missingCard) => {
+//       return cardCollection.insertOne(missingCard);
+//     }));
+//   }
   
-  // Start the process
-  Promise.all([getAllSets(), getCardIdsFromDatabase()])
-    .then(([newSets, existingCardIds]) => {
-      // For each new set, fetch and insert missing cards
-      return Promise.all(newSets.map((set) => {
-        return getAllCardsForSet(set.id)
-          .then((cards) => insertMissingCards(cards, existingCardIds));
-      }));
-    })
-    .then(() => {
-      console.log('All sets and missing cards inserted successfully.');
-    })
-    .catch((error) => {
-      console.error('Error:', error);
-    });
+//   // Start the process
+//   Promise.all([getAllSets(), getCardIdsFromDatabase()])
+//     .then(([newSets, existingCardIds]) => {
+//       // For each new set, fetch and insert missing cards
+//       return Promise.all(newSets.map((set) => {
+//         return getAllCardsForSet(set.id)
+//           .then((cards) => insertMissingCards(cards, existingCardIds));
+//       }));
+//     })
+//     .then(() => {
+//       console.log('All sets and missing cards inserted successfully.');
+//     })
+//     .catch((error) => {
+//       console.error('Error:', error);
+//     });
   
 module.exports = {
         name: 'add-cards',
@@ -73,7 +73,7 @@ module.exports = {
             {
                 name: 'set',
                 type: 3,
-                description: 'Name of the shop to manage',
+                description: 'Name of the Play set of the desired card.',
                 required: true,
                 choices: [],
                 autocomplete: true,
@@ -203,33 +203,52 @@ module.exports = {
               }
             // Create an instance of EmbedBuilder
             const embed = new EmbedBuilder()
-            .setColor('#0099ff') // You can set the color as needed
-            .setTitle('Card Added to Collection')
-            .setDescription(`Card: ${cardInfo.name}\nSet: ${cardInfo.set.name}\nCard Number: ${cardInfo.number}`)
-            .setThumbnail(cardInfo.set.images.logo) // Set thumbnail to the set's picture
-            .addFields(
-                {
-                    name: 'Price',
-                    value: `Cardmarket AVG Price: ${cardInfo.cardmarket.prices.averageSellPrice ? cardInfo.cardmarket.prices.averageSellPrice.toLocaleString('en-US', { style: 'currency', currency: 'EUR' }) : 'N/A'} | AVG 30-DAY: ${cardInfo.cardmarket.prices.avg30 ? cardInfo.cardmarket.prices.avg30.toLocaleString('en-US', { style: 'currency', currency: 'EUR' }) : 'N/A'}`
-                },
-                {
-                    name: 'Price',
-                    value: `TCG Player AVG Price: ${
-                        cardInfo.tcgplayer.prices.holofoil.market
-                            ? `${cardInfo.tcgplayer.prices.holofoil.market.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} (Holofoil)`
-                            : cardInfo.tcgplayer.prices.normal.market
-                            ? `${cardInfo.tcgplayer.prices.normal.market.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} (Normal)`
-                            : 'N/A'
-                    } | Market High: ${
-                        cardInfo.tcgplayer.prices.holofoil.high
-                            ? `${cardInfo.tcgplayer.prices.holofoil.high.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} (Holofoil)`
-                            : cardInfo.tcgplayer.prices.normal.high
-                            ? `${cardInfo.tcgplayer.prices.normal.high.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} (Normal)`
-                            : 'N/A'
-                    }`
-                }
-            )
-            .setImage(cardInfo.images.large); // Set the main image to the card's picture
+    .setColor('Green')
+    .setTitle('Card Added to Collection')
+    .setDescription(`Card: ${cardInfo.name}\nSet: ${cardInfo.set.name}\nCard Number: ${cardInfo.number}\nRarity: ${cardInfo.rarity}`)
+    .setThumbnail(cardInfo.set.images.logo)
+    .addFields(
+        {
+            name: 'Price',
+            value: `Cardmarket AVG Price: €${cardInfo.cardmarket.prices.averageSellPrice ? cardInfo.cardmarket.prices.averageSellPrice.toString() : 'N/A'} | AVG 30-DAY: €${cardInfo.cardmarket.prices.avg30 ? cardInfo.cardmarket.prices.avg30.toString() : 'N/A'}`
+        },
+        {
+            name: 'Price',
+            value: `TCG Player AVG Price: ${
+                cardInfo.tcgplayer.prices.firstEditionHolofoil && cardInfo.tcgplayer.prices.firstEditionHolofoil.market
+                    ? `$${cardInfo.tcgplayer.prices.firstEditionHolofoil.market.toString()} (First Edition Holofoil)`
+                    : cardInfo.tcgplayer.prices.unlimitedHolofoil && cardInfo.tcgplayer.prices.unlimitedHolofoil.market
+                    ? `$${cardInfo.tcgplayer.prices.unlimitedHolofoil.market.toString()} (Unlimited Holofoil)`
+                    : cardInfo.tcgplayer.prices.holofoil && cardInfo.tcgplayer.prices.holofoil.market
+                    ? `$${cardInfo.tcgplayer.prices.holofoil.market.toString()} (Holofoil)`
+                    : cardInfo.tcgplayer.prices.reverseHolofoil && cardInfo.tcgplayer.prices.reverseHolofoil.market
+                    ? `$${cardInfo.tcgplayer.prices.reverseHolofoil.market.toString()} (Reverse Holofoil)`
+                    : cardInfo.tcgplayer.prices.firstEditionNormal && cardInfo.tcgplayer.prices.firstEditionNormal.market
+                    ? `$${cardInfo.tcgplayer.prices.firstEditionNormal.market.toString()} (First Edition Normal)`
+                    : cardInfo.tcgplayer.prices.normal && cardInfo.tcgplayer.prices.normal.market
+                    ? `$${cardInfo.tcgplayer.prices.normal.market.toString()} (Normal)`
+                    : 'N/A'
+            } | Market High: ${
+                cardInfo.tcgplayer.prices.firstEditionHolofoil && cardInfo.tcgplayer.prices.firstEditionHolofoil.high
+                    ? `$${cardInfo.tcgplayer.prices.firstEditionHolofoil.high.toString()} (First Edition Holofoil)`
+                    : cardInfo.tcgplayer.prices.unlimitedHolofoil && cardInfo.tcgplayer.prices.unlimitedHolofoil.high
+                    ? `$${cardInfo.tcgplayer.prices.unlimitedHolofoil.high.toString()} (Unlimited Holofoil)`
+                    : cardInfo.tcgplayer.prices.holofoil && cardInfo.tcgplayer.prices.holofoil.high
+                    ? `$${cardInfo.tcgplayer.prices.holofoil.high.toString()} (Holofoil)`
+                    : cardInfo.tcgplayer.prices.reverseHolofoil && cardInfo.tcgplayer.prices.reverseHolofoil.high
+                    ? `$${cardInfo.tcgplayer.prices.reverseHolofoil.high.toString()} (Reverse Holofoil)`
+                    : cardInfo.tcgplayer.prices.firstEditionNormal && cardInfo.tcgplayer.prices.firstEditionNormal.high
+                    ? `$${cardInfo.tcgplayer.prices.firstEditionNormal.high.toString()} (First Edition Normal)`
+                    : cardInfo.tcgplayer.prices.normal && cardInfo.tcgplayer.prices.normal.high
+                    ? `$${cardInfo.tcgplayer.prices.normal.high.toString()} (Normal)`
+                    : 'N/A'
+            }`
+        }
+    )
+    .setImage(cardInfo.images.large);
+
+
+
 
             // Respond to the user with the embed
             await interaction.reply({ embeds: [embed], ephemeral: true });
